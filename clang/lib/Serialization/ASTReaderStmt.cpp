@@ -84,7 +84,7 @@ namespace clang {
     }
 
     TypeSourceInfo *GetTypeSourceInfo() {
-      return Record.getTypeSourceInfo();
+      return Record.readTypeSourceInfo();
     }
 
     Decl *ReadDecl() {

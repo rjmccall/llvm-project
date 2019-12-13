@@ -13,6 +13,7 @@
 #ifndef LLVM_CLANG_SERIALIZATION_ASTREADER_H
 #define LLVM_CLANG_SERIALIZATION_ASTREADER_H
 
+#include "clang/AST/AbstractBasicReader.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclarationName.h"
@@ -1345,10 +1346,6 @@ private:
   };
 
   QualType readTypeRecord(unsigned Index);
-  void readExceptionSpec(ModuleFile &ModuleFile,
-                         SmallVectorImpl<QualType> &ExceptionStorage,
-                         FunctionProtoType::ExceptionSpecInfo &ESI,
-                         const RecordData &Record, unsigned &Index);
   RecordLocation TypeCursorForIndex(unsigned Index);
   void LoadedDecl(unsigned Index, Decl *D);
   Decl *ReadDeclRecord(serialization::DeclID ID);
@@ -1781,29 +1778,6 @@ public:
     return Result;
   }
 
-  /// Reads a TemplateArgumentLocInfo appropriate for the
-  /// given TemplateArgument kind.
-  TemplateArgumentLocInfo
-  GetTemplateArgumentLocInfo(ModuleFile &F, TemplateArgument::ArgKind Kind,
-                             const RecordData &Record, unsigned &Idx);
-
-  /// Reads a TemplateArgumentLoc.
-  TemplateArgumentLoc
-  ReadTemplateArgumentLoc(ModuleFile &F,
-                          const RecordData &Record, unsigned &Idx);
-
-  const ASTTemplateArgumentListInfo*
-  ReadASTTemplateArgumentListInfo(ModuleFile &F,
-                                  const RecordData &Record, unsigned &Index);
-
-  /// Reads a declarator info from the given record.
-  TypeSourceInfo *GetTypeSourceInfo(ModuleFile &F,
-                                    const RecordData &Record, unsigned &Idx);
-
-  /// Raad the type locations for the given TInfo.
-  void ReadTypeLoc(ModuleFile &F, const RecordData &Record, unsigned &Idx,
-                   TypeLoc TL);
-
   /// Resolve a type ID into a type, potentially building a new
   /// type.
   QualType GetType(serialization::TypeID ID);
@@ -2136,57 +2110,9 @@ public:
   serialization::SelectorID getGlobalSelectorID(ModuleFile &F,
                                                 unsigned LocalID) const;
 
-  /// Read a declaration name.
-  DeclarationName ReadDeclarationName(ModuleFile &F,
-                                      const RecordData &Record, unsigned &Idx);
-  void ReadDeclarationNameLoc(ModuleFile &F,
-                              DeclarationNameLoc &DNLoc, DeclarationName Name,
-                              const RecordData &Record, unsigned &Idx);
-  void ReadDeclarationNameInfo(ModuleFile &F, DeclarationNameInfo &NameInfo,
-                               const RecordData &Record, unsigned &Idx);
-
-  void ReadQualifierInfo(ModuleFile &F, QualifierInfo &Info,
-                         const RecordData &Record, unsigned &Idx);
-
-  NestedNameSpecifier *ReadNestedNameSpecifier(ModuleFile &F,
-                                               const RecordData &Record,
-                                               unsigned &Idx);
-
-  NestedNameSpecifierLoc ReadNestedNameSpecifierLoc(ModuleFile &F,
-                                                    const RecordData &Record,
-                                                    unsigned &Idx);
-
-  /// Read a template name.
-  TemplateName ReadTemplateName(ModuleFile &F, const RecordData &Record,
-                                unsigned &Idx);
-
-  /// Read a template argument.
-  TemplateArgument ReadTemplateArgument(ModuleFile &F, const RecordData &Record,
-                                        unsigned &Idx,
-                                        bool Canonicalize = false);
-
-  /// Read a template parameter list.
-  TemplateParameterList *ReadTemplateParameterList(ModuleFile &F,
-                                                   const RecordData &Record,
-                                                   unsigned &Idx);
-
-  /// Read a template argument array.
-  void ReadTemplateArgumentList(SmallVectorImpl<TemplateArgument> &TemplArgs,
-                                ModuleFile &F, const RecordData &Record,
-                                unsigned &Idx, bool Canonicalize = false);
-
   /// Read a UnresolvedSet structure.
   void ReadUnresolvedSet(ModuleFile &F, LazyASTUnresolvedSet &Set,
                          const RecordData &Record, unsigned &Idx);
-
-  /// Read a C++ base specifier.
-  CXXBaseSpecifier ReadCXXBaseSpecifier(ModuleFile &F,
-                                        const RecordData &Record,unsigned &Idx);
-
-  /// Read a CXXCtorInitializer array.
-  CXXCtorInitializer **
-  ReadCXXCtorInitializers(ModuleFile &F, const RecordData &Record,
-                          unsigned &Idx);
 
   /// Read the contents of a CXXCtorInitializer array.
   CXXCtorInitializer **GetExternalCXXCtorInitializers(uint64_t Offset) override;
@@ -2227,19 +2153,6 @@ public:
   SourceRange ReadSourceRange(ModuleFile &F,
                               const RecordData &Record, unsigned &Idx);
 
-  /// Read an integral value
-  llvm::APInt ReadAPInt(const RecordData &Record, unsigned &Idx);
-
-  /// Read a signed integral value
-  llvm::APSInt ReadAPSInt(const RecordData &Record, unsigned &Idx);
-
-  /// Read a floating-point value
-  llvm::APFloat ReadAPFloat(const RecordData &Record,
-                            const llvm::fltSemantics &Sem, unsigned &Idx);
-
-  /// Read an APValue
-  APValue ReadAPValue(const RecordData &Record, unsigned &Idx);
-
   // Read a string
   static std::string ReadString(const RecordData &Record, unsigned &Idx);
 
@@ -2265,12 +2178,6 @@ public:
 
   CXXTemporary *ReadCXXTemporary(ModuleFile &F, const RecordData &Record,
                                  unsigned &Idx);
-
-  /// Reads one attribute from the current stream position.
-  Attr *ReadAttr(ModuleFile &M, const RecordData &Record, unsigned &Idx);
-
-  /// Reads attributes from the current stream position.
-  void ReadAttributes(ASTRecordReader &Record, AttrVec &Attrs);
 
   /// Reads a statement.
   Stmt *ReadStmt(ModuleFile &F);
@@ -2379,7 +2286,8 @@ public:
 };
 
 /// An object for streaming information from a record.
-class ASTRecordReader {
+class ASTRecordReader
+    : public serialization::DataStreamBasicReader<ASTRecordReader> {
   using ModuleFile = serialization::ModuleFile;
 
   ASTReader *Reader;
@@ -2392,7 +2300,8 @@ class ASTRecordReader {
 
 public:
   /// Construct an ASTRecordReader that uses the default encoding scheme.
-  ASTRecordReader(ASTReader &Reader, ModuleFile &F) : Reader(&Reader), F(&F) {}
+  ASTRecordReader(ASTReader &Reader, ModuleFile &F)
+    : DataStreamBasicReader(Reader.getContext()), Reader(&Reader), F(&F) {}
 
   /// Reads a record with id AbbrevID from Cursor, resetting the
   /// internal state.
@@ -2459,11 +2368,6 @@ public:
                              static_cast<ExplicitSpecKind>(Kind));
   }
 
-  void readExceptionSpec(SmallVectorImpl<QualType> &ExceptionStorage,
-                         FunctionProtoType::ExceptionSpecInfo &ESI) {
-    return Reader->readExceptionSpec(*F, ExceptionStorage, ESI, Record, Idx);
-  }
-
   /// Get the global offset corresponding to a local offset.
   uint64_t getGlobalBitOffset(uint32_t LocalOffset) {
     return Reader->getGlobalBitOffset(*F, LocalOffset);
@@ -2471,6 +2375,7 @@ public:
 
   /// Reads a statement.
   Stmt *readStmt() { return Reader->ReadStmt(*F); }
+  Stmt *readStmtRef() { return readStmt(); /* FIXME: readSubStmt? */ }
 
   /// Reads an expression.
   Expr *readExpr() { return Reader->ReadExpr(*F); }
@@ -2492,30 +2397,19 @@ public:
   /// Reads a TemplateArgumentLocInfo appropriate for the
   /// given TemplateArgument kind, advancing Idx.
   TemplateArgumentLocInfo
-  getTemplateArgumentLocInfo(TemplateArgument::ArgKind Kind) {
-    return Reader->GetTemplateArgumentLocInfo(*F, Kind, Record, Idx);
-  }
+  readTemplateArgumentLocInfo(TemplateArgument::ArgKind Kind);
 
   /// Reads a TemplateArgumentLoc, advancing Idx.
-  TemplateArgumentLoc
-  readTemplateArgumentLoc() {
-    return Reader->ReadTemplateArgumentLoc(*F, Record, Idx);
-  }
+  TemplateArgumentLoc readTemplateArgumentLoc();
 
   const ASTTemplateArgumentListInfo*
-  readASTTemplateArgumentListInfo() {
-    return Reader->ReadASTTemplateArgumentListInfo(*F, Record, Idx);
-  }
+  readASTTemplateArgumentListInfo();
 
   /// Reads a declarator info from the given record, advancing Idx.
-  TypeSourceInfo *getTypeSourceInfo() {
-    return Reader->GetTypeSourceInfo(*F, Record, Idx);
-  }
+  TypeSourceInfo *readTypeSourceInfo();
 
   /// Reads the location information for a type.
-  void readTypeLoc(TypeLoc TL) {
-    return Reader->ReadTypeLoc(*F, Record, Idx, TL);
-  }
+  void readTypeLoc(TypeLoc TL);
 
   /// Map a local type ID within a given AST file to a global type ID.
   serialization::TypeID getGlobalTypeID(unsigned LocalID) const {
@@ -2525,6 +2419,9 @@ public:
   /// Read a type from the current position in the record.
   QualType readType() {
     return Reader->readType(*F, Record, Idx);
+  }
+  QualType readQualType() {
+    return readType();
   }
 
   /// Reads a declaration ID from the given position in this record.
@@ -2538,6 +2435,9 @@ public:
   /// given module, advancing Idx.
   Decl *readDecl() {
     return Reader->ReadDecl(*F, Record, Idx);
+  }
+  Decl *readDeclRef() {
+    return readDecl();
   }
 
   /// Reads a declaration from the given position in the record,
@@ -2553,56 +2453,39 @@ public:
   IdentifierInfo *getIdentifierInfo() {
     return Reader->GetIdentifierInfo(*F, Record, Idx);
   }
+  IdentifierInfo *readIdentifier() {
+    return getIdentifierInfo();
+  }
 
   /// Read a selector from the Record, advancing Idx.
   Selector readSelector() {
     return Reader->ReadSelector(*F, Record, Idx);
   }
 
+  // Inherited:
+  //   DeclarationName readDeclarationName()
+
   /// Read a declaration name, advancing Idx.
-  DeclarationName readDeclarationName() {
-    return Reader->ReadDeclarationName(*F, Record, Idx);
-  }
-  void readDeclarationNameLoc(DeclarationNameLoc &DNLoc, DeclarationName Name) {
-    return Reader->ReadDeclarationNameLoc(*F, DNLoc, Name, Record, Idx);
-  }
-  void readDeclarationNameInfo(DeclarationNameInfo &NameInfo) {
-    return Reader->ReadDeclarationNameInfo(*F, NameInfo, Record, Idx);
-  }
+  void readDeclarationNameLoc(DeclarationNameLoc &DNLoc, DeclarationName Name);
+  void readDeclarationNameInfo(DeclarationNameInfo &NameInfo);
 
-  void readQualifierInfo(QualifierInfo &Info) {
-    return Reader->ReadQualifierInfo(*F, Info, Record, Idx);
-  }
+  void readQualifierInfo(QualifierInfo &Info);
 
-  NestedNameSpecifier *readNestedNameSpecifier() {
-    return Reader->ReadNestedNameSpecifier(*F, Record, Idx);
-  }
+  // Inherited:
+  //   NestedNameSpecifier *readNestedNameSpecifier()
 
-  NestedNameSpecifierLoc readNestedNameSpecifierLoc() {
-    return Reader->ReadNestedNameSpecifierLoc(*F, Record, Idx);
-  }
+  NestedNameSpecifierLoc readNestedNameSpecifierLoc();
 
-  /// Read a template name, advancing Idx.
-  TemplateName readTemplateName() {
-    return Reader->ReadTemplateName(*F, Record, Idx);
-  }
-
-  /// Read a template argument, advancing Idx.
-  TemplateArgument readTemplateArgument(bool Canonicalize = false) {
-    return Reader->ReadTemplateArgument(*F, Record, Idx, Canonicalize);
-  }
+  // Inherited:
+  //   TemplateName readTemplateName()
+  //   TemplateArgument readTemplateArgument(bool canonicalize = false)
 
   /// Read a template parameter list, advancing Idx.
-  TemplateParameterList *readTemplateParameterList() {
-    return Reader->ReadTemplateParameterList(*F, Record, Idx);
-  }
+  TemplateParameterList *readTemplateParameterList();
 
   /// Read a template argument array, advancing Idx.
   void readTemplateArgumentList(SmallVectorImpl<TemplateArgument> &TemplArgs,
-                                bool Canonicalize = false) {
-    return Reader->ReadTemplateArgumentList(TemplArgs, *F, Record, Idx,
-                                            Canonicalize);
-  }
+                                bool Canonicalize = false);
 
   /// Read a UnresolvedSet structure, advancing Idx.
   void readUnresolvedSet(LazyASTUnresolvedSet &Set) {
@@ -2610,14 +2493,10 @@ public:
   }
 
   /// Read a C++ base specifier, advancing Idx.
-  CXXBaseSpecifier readCXXBaseSpecifier() {
-    return Reader->ReadCXXBaseSpecifier(*F, Record, Idx);
-  }
+  CXXBaseSpecifier readCXXBaseSpecifier();
 
   /// Read a CXXCtorInitializer array, advancing Idx.
-  CXXCtorInitializer **readCXXCtorInitializers() {
-    return Reader->ReadCXXCtorInitializers(*F, Record, Idx);
-  }
+  CXXCtorInitializer **readCXXCtorInitializers();
 
   CXXTemporary *readCXXTemporary() {
     return Reader->ReadCXXTemporary(*F, Record, Idx);
@@ -2633,22 +2512,26 @@ public:
     return Reader->ReadSourceRange(*F, Record, Idx);
   }
 
-  APValue readAPValue() { return Reader->ReadAPValue(Record, Idx); }
+  APValue readAPValue();
 
-  /// Read an integral value, advancing Idx.
-  llvm::APInt readAPInt() {
-    return Reader->ReadAPInt(Record, Idx);
+  bool readBool() {
+    return readInt();
   }
 
-  /// Read a signed integral value, advancing Idx.
-  llvm::APSInt readAPSInt() {
-    return Reader->ReadAPSInt(Record, Idx);
+  uint32_t readUInt32() {
+    return uint32_t(readInt());
   }
+
+  uint64_t readUInt64() {
+    return readInt();
+  }
+
+  // Inherited:
+  //   llvm::APInt readAPInt();
+  //   llvm::APSInt readAPSInt();
 
   /// Read a floating-point value, advancing Idx.
-  llvm::APFloat readAPFloat(const llvm::fltSemantics &Sem) {
-    return Reader->ReadAPFloat(Record, Sem,Idx);
-  }
+  llvm::APFloat readAPFloat(const llvm::fltSemantics &Sem);
 
   /// Read a string, advancing Idx.
   std::string readString() {
@@ -2666,14 +2549,10 @@ public:
   }
 
   /// Reads one attribute from the current stream position, advancing Idx.
-  Attr *readAttr() {
-    return Reader->ReadAttr(*F, Record, Idx);
-  }
+  Attr *readAttr();
 
   /// Reads attributes from the current stream position, advancing Idx.
-  void readAttributes(AttrVec &Attrs) {
-    return Reader->ReadAttributes(*this, Attrs);
-  }
+  void readAttributes(AttrVec &Attrs);
 
   /// Reads a token out of a record, advancing Idx.
   Token readToken() {

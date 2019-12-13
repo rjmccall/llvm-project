@@ -120,7 +120,7 @@ namespace clang {
     }
 
     TypeSourceInfo *GetTypeSourceInfo() {
-      return Record.getTypeSourceInfo();
+      return Record.readTypeSourceInfo();
     }
 
     serialization::DeclID ReadDeclID() {
@@ -2684,54 +2684,50 @@ void ASTDeclReader::VisitOMPCapturedExprDecl(OMPCapturedExprDecl *D) {
 
 namespace {
 class AttrReader {
-  ModuleFile *F;
-  ASTReader *Reader;
-  const ASTReader::RecordData &Record;
-  unsigned &Idx;
+  ASTRecordReader &Reader;
 
 public:
-  AttrReader(ModuleFile &F, ASTReader &Reader,
-             const ASTReader::RecordData &Record, unsigned &Idx)
-      : F(&F), Reader(&Reader), Record(Record), Idx(Idx) {}
+  AttrReader(ASTRecordReader &Reader) : Reader(Reader) {}
 
-  const uint64_t &readInt() { return Record[Idx++]; }
+  const uint64_t &readInt() {
+    return Reader.readInt();
+  }
 
   SourceRange readSourceRange() {
-    return Reader->ReadSourceRange(*F, Record, Idx);
+    return Reader.readSourceRange();
   }
 
   SourceLocation readSourceLocation() {
-    return Reader->ReadSourceLocation(*F, Record, Idx);
+    return Reader.readSourceLocation();
   }
 
-  Expr *readExpr() { return Reader->ReadExpr(*F); }
+  Expr *readExpr() { return Reader.readExpr(); }
 
   std::string readString() {
-    return Reader->ReadString(Record, Idx);
+    return Reader.readString();
   }
 
   TypeSourceInfo *getTypeSourceInfo() {
-    return Reader->GetTypeSourceInfo(*F, Record, Idx);
+    return Reader.readTypeSourceInfo();
   }
 
   IdentifierInfo *getIdentifierInfo() {
-    return Reader->GetIdentifierInfo(*F, Record, Idx);
+    return Reader.readIdentifier();
   }
 
   VersionTuple readVersionTuple() {
-    return ASTReader::ReadVersionTuple(Record, Idx);
+    return Reader.readVersionTuple();
   }
 
   template <typename T> T *GetLocalDeclAs(uint32_t LocalID) {
-    return cast_or_null<T>(Reader->GetLocalDecl(*F, LocalID));
+    return Reader.GetLocalDeclAs<T>(LocalID);
   }
 };
 }
 
-Attr *ASTReader::ReadAttr(ModuleFile &M, const RecordData &Rec,
-                          unsigned &Idx) {
-  AttrReader Record(M, *this, Rec, Idx);
-  auto V = Record.readInt();
+Attr *ASTRecordReader::readAttr() {
+  AttrReader Record(*this);
+  auto V = readUInt64();
   if (!V)
     return nullptr;
 
@@ -2760,9 +2756,9 @@ Attr *ASTReader::ReadAttr(ModuleFile &M, const RecordData &Rec,
 }
 
 /// Reads attributes from the current stream position.
-void ASTReader::ReadAttributes(ASTRecordReader &Record, AttrVec &Attrs) {
-  for (unsigned I = 0, E = Record.readInt(); I != E; ++I)
-    Attrs.push_back(Record.readAttr());
+void ASTRecordReader::readAttributes(AttrVec &Attrs) {
+  for (unsigned I = 0, E = readInt(); I != E; ++I)
+    Attrs.push_back(readAttr());
 }
 
 //===----------------------------------------------------------------------===//
@@ -4475,9 +4471,8 @@ void ASTDeclReader::UpdateDecl(Decl *D,
     }
 
     case UPD_CXX_RESOLVED_EXCEPTION_SPEC: {
-      FunctionProtoType::ExceptionSpecInfo ESI;
       SmallVector<QualType, 8> ExceptionStorage;
-      Record.readExceptionSpec(ExceptionStorage, ESI);
+      auto ESI = Record.readExceptionSpecInfo(ExceptionStorage);
 
       // Update this declaration's exception specification, if needed.
       auto *FD = cast<FunctionDecl>(D);
